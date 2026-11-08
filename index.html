@@ -1,0 +1,386 @@
+<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>食品工厂 · 云端管理系统</title>
+<style>*{box-sizing:border-box}body{margin:0;font-family:Arial;background:#f3f4f6}header{background:#111827;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}button{padding:8px 12px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}button.g{background:#16a34a}button.o{background:#f59e0b}button.r{background:#dc2626}button.w{background:#fff;color:#111827}.tabs{display:flex;gap:6px;padding:10px;background:#fff;overflow:auto}.tabs button{background:#e5e7eb;color:#111}.tabs button.on{background:#111827;color:#fff}.card{background:#fff;margin:10px;padding:14px;border-radius:12px;overflow-x:auto}input,select{padding:8px;border:1px solid #d1d5db;border-radius:8px;width:100%;margin:4px 0;min-width:0}input[readonly],select:disabled{background:#f3f4f6;color:#111827;cursor:not-allowed}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid4{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(110px,0.9fr) minmax(70px,0.6fr) minmax(170px,1.1fr);gap:6px;align-items:center;min-width:560px}.grid3{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(110px,0.9fr) minmax(70px,0.6fr);gap:6px;align-items:center;min-width:380px}.grid5{display:grid;grid-template-columns:1.2fr 1fr 0.9fr 0.6fr 0.9fr;gap:6px}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px;min-width:600px}th,td{border-bottom:1px solid #eee;padding:8px;text-align:left}.low{color:#dc2626;font-weight:700;background:#fef2f2}.small{font-size:12px;color:#6b7280}.editcode{background:#fffbeb;border:1px solid #f59e0b !important;font-weight:700}.batchsel{background:#f0fdf4;border:1px solid #16a34a !important}.unitsel{background:#eff6ff;border:1px solid #2563eb !important}.lbl{font-size:12px;color:#6b7280;padding:4px}.plus{color:#16a34a;font-weight:700}.minus{color:#dc2626;font-weight:700}@media(max-width:800px){.grid,.grid5{grid-template-columns:1fr}}
+.auth-wrap{max-width:440px;margin:8vh auto;padding:24px;background:#fff;border-radius:16px;box-shadow:0 10px 35px #00000012}.auth-wrap h2{margin-top:0}.auth-wrap button{width:100%;margin-top:8px}.auth-note{font-size:13px;color:#6b7280;line-height:1.6}.auth-error{color:#b91c1c;background:#fef2f2;padding:10px;border-radius:8px;margin:10px 0;font-size:13px}.auth-ok{color:#166534;background:#f0fdf4;padding:10px;border-radius:8px;margin:10px 0;font-size:13px}.cloud-pill{font-size:12px;background:#dcfce7;color:#166534;padding:5px 9px;border-radius:999px}.muted{color:#6b7280}
+</style>
+</head><body>
+<div id="auth" class="auth-wrap">
+  <h2>🧄 食品工厂 · 云端系统</h2>
+  <p class="auth-note">使用老板或工人个人账号登录。资料会保存在 Supabase 云端。</p>
+  <form id="authForm">
+    <label>电邮</label><input id="authEmail" type="email" autocomplete="username" required placeholder="name@example.com">
+    <label>密码</label><input id="authPassword" type="password" autocomplete="current-password" required minlength="6" placeholder="至少 6 个字符">
+    <button id="loginBtn" type="submit">登录</button>
+    <button id="signupBtn" type="button" class="g" onclick="signUp()">注册新账号</button>
+  </form>
+  <button type="button" class="w" onclick="signOut()">退出当前账号 / 切换账号</button>
+  <div id="authMessage"></div>
+  <p class="auth-note">新注册账号默认不会自动获得工厂权限，需要老板在 Supabase 将账号加入工厂，避免陌生人自行取得老板权限。</p>
+</div>
+<div id="main" style="display:none">
+<header><b>🧄 食品工厂 · 云端管理系统</b><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span id="userBadge" class="cloud-pill">云端已连接</span><button class="g" onclick="exportDB()">💾 Export 备份</button><button class="o" id="importBtn" onclick="document.getElementById('importFile').click()">📥 Import 还原</button><input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importDB(event)"><button class="w" onclick="signOut()">退出登录</button></div></header>
+<div class="tabs" id="tabs"></div><div id="app"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL='https://ljlbsaurccklyqhrurzi.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxqbGJzYXVyY2NrbHlxaHJ1cnppIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwOTg3MTUsImV4cCI6MjEwOTY3NDcxNX0.SWuhEyisoIjq6mkazOR38ea0sseMpTdBTck612bNnec';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+const EMPTY_DB={products:[],customers:[],suppliers:[],sales:[],purchases:[],assemblies:[],settingAssemblies:[],logs:[],history:[],batches:[]};
+let DB=JSON.parse(JSON.stringify(EMPTY_DB));
+let currentUser=null, currentCompany=null, appRole=null, cloudBusy=false, savePending=false;
+function authMessage(msg,type='error'){const el=document.getElementById('authMessage');if(el)el.innerHTML=`<div class="${type==='ok'?'auth-ok':'auth-error'}">${msg}</div>`;}
+function showAuth(msg=''){document.getElementById('auth').style.display='block';document.getElementById('main').style.display='none';if(msg)authMessage(msg);}
+function normalizeDB(obj){let d={...EMPTY_DB,...(obj||{})};for(const k of Object.keys(EMPTY_DB))if(!Array.isArray(d[k]))d[k]=[];return d;}
+async function signUp(){const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;if(!email||!password)return authMessage('请填写电邮和密码');const {error}=await sb.auth.signUp({email,password});if(error)return authMessage(error.message);authMessage('注册请求已提交。如果 Supabase 要求电邮验证，请先到邮箱验证。之后请老板把这个账号加入工厂。','ok');}
+async function signOut(){await sb.auth.signOut();currentUser=null;currentCompany=null;appRole=null;showAuth('已退出登录。');}
+async function handleSession(session){
+ if(!session){currentUser=null;currentCompany=null;appRole=null;showAuth();return;}
+ currentUser=session.user;showAuth('正在读取账号权限…','ok');
+ const {data:profile,error}=await sb.from('profiles').select('id,company_id,role').eq('id',currentUser.id).maybeSingle();
+ if(error){showAuth('读取账号权限失败：'+error.message+'。请先执行压缩包内的 supabase-schema.sql。');return;}
+ if(!profile||!profile.company_id||!['boss','worker'].includes(profile.role)){showAuth('账号已登录，但尚未加入工厂。请老板在 Supabase SQL Editor 执行说明文件中的「加入工人账号」SQL。');return;}
+ currentCompany=profile.company_id;appRole=profile.role;
+ const {data:state,error:stateErr}=await sb.from('factory_state').select('data').eq('company_id',currentCompany).maybeSingle();
+ if(stateErr){showAuth('读取云端资料失败：'+stateErr.message+'。请检查数据库表和 RLS 设置。');return;}
+ DB=normalizeDB(state?state.data:EMPTY_DB);
+ if(!state&&appRole==='boss'){
+   const {error:insertErr}=await sb.from('factory_state').insert({company_id:currentCompany,data:DB});
+   if(insertErr){showAuth('初始化云端资料失败：'+insertErr.message);return;}
+ }
+ localStorage.setItem('factory_desktop_'+currentCompany,JSON.stringify(DB));
+ document.getElementById('auth').style.display='none';document.getElementById('main').style.display='block';
+ document.getElementById('userBadge').textContent=(appRole==='boss'?'老板':'工人')+' · '+currentUser.email+' · 云端同步';
+ document.getElementById('importBtn').style.display=appRole==='boss'?'':'none';
+ cur=appRole==='boss'?'Dashboard':'库存查询';render();
+}
+async function save(){
+ DB=normalizeDB(DB);localStorage.setItem('factory_desktop_'+(currentCompany||'local'),JSON.stringify(DB));render();
+ if(!currentUser||!currentCompany||appRole!=='boss')return;
+ if(cloudBusy){savePending=true;return;}
+ cloudBusy=true;
+ let error=null;
+ do {
+   savePending=false;
+   const result=await sb.from('factory_state').upsert({company_id:currentCompany,data:DB,updated_at:new Date().toISOString()},{onConflict:'company_id'});
+   error=result.error;
+ } while(savePending && !error);
+ cloudBusy=false;
+ const badge=document.getElementById('userBadge');
+ if(error){if(badge)badge.textContent='⚠️ 云端保存失败';alert('云端保存失败：'+error.message+'。请检查网络和 Supabase RLS。');}
+ else if(badge)badge.textContent='老板 · '+currentUser.email+' · 已同步';
+}
+function exportDB(){
+let data=JSON.stringify(DB,null,2);
+let blob=new Blob([data],{type:'application/json'});
+let url=URL.createObjectURL(blob);
+let a=document.createElement('a');a.href=url;
+let d=new Date();let ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+a.download='factory_backup_'+ds+'.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+alert('已 Export 备份，文件已下载：factory_backup_'+ds+'.json\n请把这个文件存去 USB / D盘 / WhatsApp，自己收好');
+}
+function importDB(e){
+let f=e.target.files[0];if(!f)return;
+let r=new FileReader();r.onload=function(){
+try{
+let obj=JSON.parse(r.result);
+if(!obj||typeof obj!=='object'||!Array.isArray(obj.products))throw new Error('不是备份文件');
+if(!confirm('确定要还原吗？现在的资料会被备份文件里面的资料盖掉！\n还原前建议先按 Export 备份现在的资料。'))return;
+DB=obj;
+if(!DB.settingAssemblies)DB.settingAssemblies=[];
+if(!DB.assemblies)DB.assemblies=[];
+if(!DB.logs)DB.logs=[];if(!DB.history)DB.history=[];if(!DB.batches)DB.batches=[];
+if(!DB.customers)DB.customers=[];if(!DB.suppliers)DB.suppliers=[];
+if(!DB.sales)DB.sales=[];if(!DB.purchases)DB.purchases=[];
+localStorage.setItem('factory_desktop_'+(currentCompany||'local'),JSON.stringify(DB));
+save();
+alert('已 Import 还原成功！产品 '+DB.products.length+' 个，库存批次 '+DB.batches.length+' 笔');
+render();
+}catch(err){alert('Import 失败：这个不是正确的备份文件，请选 Export 下载出来的 .json 文件');}
+e.target.value='';
+};r.readAsText(f);
+}
+let cur='Dashboard';
+let ASM_BASE=null;let ASM_BASE_OUT=0;
+let EDIT_CODE=null;
+const TABS_BOSS=['Dashboard','产品设置','库存查询','Sales','Purchase','Stock Assembly','Setting Stock Assembly','Supplier','Customer','Debtor','Stock Card','用户日志'];
+const TABS_WORKER=['库存查询','Stock Card'];
+function total(p){return DB.batches.filter(b=>b.product_code===p.code).reduce((s,b)=>s+b.qty,0)}
+function code(pfx,arr){return pfx+String(arr.length+1).padStart(4,'0')}
+function role(){return appRole==='boss'?'老板':'工人'}
+function log(act){DB.logs.unshift({who:role(),act,time:new Date().toLocaleString()});save();}
+function addHistory(code,type,qty,note){DB.history.unshift({product_code:code,type,qty,note,time:new Date().toLocaleString()});}
+function pendingFor(pcode){
+let outPc=0,usePc=0;
+(DB.assemblies||[]).forEach(a=>{if(a.done)return;if(a.code===pcode)outPc+=a.out_qty*(a.out_pcs||1);(a.items||[]).forEach(it=>{if(it.product_code===pcode)usePc+=it.qtyPc||0;});});
+return {outPc,usePc};
+}
+function pendingHtml(pcode){
+let pp=pendingFor(pcode);let parts=[];
+if(pp.outPc>0)parts.push(`<span class="plus">(+${pp.outPc})</span>`);
+if(pp.usePc>0)parts.push(`<span class="minus">(-${pp.usePc})</span>`);
+return parts.length?parts.join('<br>'):'-';
+}
+function filterProducts(q){
+let key=(q||'').trim().toLowerCase();
+let tb=document.getElementById('ptable');if(tb){
+let rows=tb.getElementsByTagName('tr');
+for(let i=1;i<rows.length;i++){
+let row=rows[i];
+let codeTxt=(row.cells[0]?row.cells[0].innerText:'').toLowerCase();
+let nameTxt=(row.cells[1]?row.cells[1].innerText:'').toLowerCase();
+if(!key||codeTxt.includes(key)||nameTxt.includes(key)){row.style.display='';}else{row.style.display='none';}
+}
+let cnt=document.getElementById('pcnt');if(cnt){let vis=0;for(let i=1;i<rows.length;i++){if(rows[i].style.display!=='none')vis++;}cnt.innerText=key?('搜到 '+vis+' 个'):('共 '+DB.products.length+' 个');}
+}
+let ht=document.getElementById('htable');if(ht){
+let hrows=ht.getElementsByTagName('tr');
+let matchCodes=new Set(DB.products.filter(p=>!key||p.code.toLowerCase().includes(key)||p.name.toLowerCase().includes(key)).map(p=>p.code));
+let hvis=0;
+for(let i=1;i<hrows.length;i++){
+let row=hrows[i];
+let hcode=(row.cells[1]?row.cells[1].innerText:'').trim();
+if(!key||matchCodes.has(hcode)){row.style.display='';hvis++;}else{row.style.display='none';}
+}
+let hcnt=document.getElementById('hcnt');if(hcnt)hcnt.innerText=key?('只显示搜到的产品 - 共 '+hvis+' 笔'):('共 '+DB.history.length+' 笔');
+}
+}
+function stockTable(showEdit){
+return `<div class="card"><h3>库存查询 - 不够自动变红 | 搜产品</h3><p class="small">待完成 = Stock Assembly 里面还没按 已完成 的单。成品 (+数量) 是做好会加，原料 (-数量) 是做好会扣。按了 已完成，待完成就会不见。</p><input id="psearch" oninput="filterProducts(this.value)" placeholder="搜 Stock Code / 名字，不分大写小写，例如 stk0003 / palm"><div class="small" id="pcnt">共 ${DB.products.length} 个</div><table id="ptable"><tr><th>Stock Code</th><th>产品</th><th>预设单位</th><th>进价/卖价</th><th>Min</th><th>待完成</th><th>现有</th><th>Expire 批次</th>${showEdit?'<th>操作</th>':''}</tr>${DB.products.map(p=>{let t=total(p),low=t<=(p.min_level||0);let bs=DB.batches.filter(b=>b.product_code===p.code);return `<tr class="${low?'low':''}"><td>${p.code}</td><td>${p.name}</td><td>${(p.units&&p.units[0])?p.units[0].n:''}</td><td>${p.cost} / ${p.price}</td><td>${p.min_level}</td><td>${pendingHtml(p.code)}</td><td>${t} ${low?'⚠️ 不够':''}</td><td>${bs.map(b=>`${b.exp_date}: ${b.qty}`).join('<br>')}</td>${showEdit?`<td><button class="o" onclick="editP('${p.code}')">Edit</button></td>`:''}</tr>`}).join('')}</table></div>`;}
+function historyTable(){return `<div class="card"><h3>Stock Inquiry - Transaction History / Stock Card</h3><p class="small" id="hcnt">共 ${DB.history.length} 笔 - 上面搜产品，这里也会跟着只显示那个产品</p><table id="htable"><tr><th>时间</th><th>Code</th><th>类型</th><th>数量</th><th>备注</th></tr>${DB.history.map(x=>`<tr><td>${x.time}</td><td>${x.product_code}</td><td>${x.type}</td><td>${x.qty}</td><td>${x.note}</td></tr>`).join('')}</table></div>`}
+function batchOptions(pcode){let list=[];DB.batches.forEach((b,i)=>{if(b.product_code===pcode)list.push({i,b})});list.sort((a,b)=>a.b.exp_date.localeCompare(b.b.exp_date));return `<option value="AUTO">自动 FEFO - 先扣最早过期</option>`+list.map(x=>`<option value="${x.i}">Exp ${x.b.exp_date} 剩 ${x.b.qty}</option>`).join('');}
+function unitOptions(pcode){let p=DB.products.find(x=>x.code===pcode);let us=(p&&p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];return us.map((u,i)=>`<option value="${i}">${u.n} = ${u.pcs} pc</option>`).join('');}
+function updateSales(){let sp=document.getElementById('sp');let sb=document.getElementById('sb');let su=document.getElementById('su');if(sp&&sb)sb.innerHTML=batchOptions(sp.value);if(sp&&su)su.innerHTML=unitOptions(sp.value);}
+function updatePur(){let pp2=document.getElementById('pp2');let pu=document.getElementById('pu');if(pp2&&pu)pu.innerHTML=unitOptions(pp2.value);}
+function updateAsmRow(i){let prod=document.getElementById('ap'+i);let unit=document.getElementById('au'+i);let batch=document.getElementById('ab'+i);if(!prod)return;if(!prod.value){if(unit)unit.innerHTML='<option value="0">先选产品</option>';if(batch)batch.innerHTML='<option value="AUTO">先选产品</option>';return;}if(unit)unit.innerHTML=unitOptions(prod.value);if(batch)batch.innerHTML=batchOptions(prod.value);}
+function updateSettingFinished(){let ac=document.getElementById('sacode');let anEl=document.getElementById('san');let au=document.getElementById('saunit');if(!ac)return;let p=DB.products.find(x=>x.code===ac.value);if(p&&anEl)anEl.value=p.name;if(p&&au)au.innerHTML=unitOptions(p.code);}
+function updateSettingRow(i){let prod=document.getElementById('sap'+i);let unit=document.getElementById('sau'+i);if(!prod)return;if(!prod.value){if(unit)unit.innerHTML='<option value="0">先选产品</option>';return;}if(unit)unit.innerHTML=unitOptions(prod.value);}
+function recalcAsmQty(){
+let aqout=document.getElementById('aqout');if(!aqout||!ASM_BASE||!ASM_BASE_OUT)return;
+let newOut=+aqout.value||0;let ratio=newOut/ASM_BASE_OUT;
+ASM_BASE.forEach((it,i)=>{let q=document.getElementById('aq'+i);if(q){let v=it.qty*ratio; q.value=(Math.round(v*1000)/1000);}});
+}
+function updateAsmFinished(){
+let ac=document.getElementById('acode');let anEl=document.getElementById('an');let aqout=document.getElementById('aqout');let aunit=document.getElementById('aunit');
+if(!ac)return;
+if(!ac.value){
+if(anEl)anEl.value='';if(aqout)aqout.value='';if(aunit){aunit.innerHTML='<option value="">-</option>';aunit.disabled=true;}
+ASM_BASE=null;ASM_BASE_OUT=0;
+for(let i=0;i<10;i++){let pr=document.getElementById('ap'+i);let q=document.getElementById('aq'+i);let un=document.getElementById('au'+i);let b=document.getElementById('ab'+i);if(pr)pr.value='';if(q)q.value='';if(un)un.innerHTML='<option value="0">先选产品</option>';if(b)b.innerHTML='<option value="AUTO">先选产品</option>';}
+return;
+}
+let p=DB.products.find(x=>x.code===ac.value);if(p&&anEl)anEl.value=p.name;
+let st=DB.settingAssemblies.find(x=>x.code===ac.value);
+if(!st)return;
+if(aunit&&p){aunit.innerHTML=unitOptions(p.code);aunit.value=st.out_unitIdx!=null?st.out_unitIdx:0;aunit.disabled=true;}
+ASM_BASE=(st.items||[]).map(x=>({qty:x.qty}));ASM_BASE_OUT=st.out_qty||1;
+if(st&&aqout)aqout.value=st.out_qty||'';
+for(let i=0;i<10;i++){let pr=document.getElementById('ap'+i);let q=document.getElementById('aq'+i);let un=document.getElementById('au'+i);if(pr)pr.value='';if(q)q.value='';if(un)un.innerHTML='<option value="0">先选产品</option>';let b=document.getElementById('ab'+i);if(b)b.innerHTML='<option value="AUTO">先选产品</option>';}
+(st.items||[]).forEach((it,i)=>{if(i>=10)return;let pr=document.getElementById('ap'+i);let un=document.getElementById('au'+i);let q=document.getElementById('aq'+i);let b=document.getElementById('ab'+i);if(!pr)return;pr.value=it.product_code;if(un){un.innerHTML=unitOptions(it.product_code);un.value=it.unitIdx!=null?it.unitIdx:0;un.disabled=true;}if(q){q.value=it.qty;q.readOnly=true;}if(pr)pr.disabled=true;if(b){b.innerHTML=batchOptions(it.product_code);b.disabled=false;}});
+}
+function asmRow(i){let opts=`<option value="">-- 第${i+1}个原料 不用就空着 --</option>`+DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`).join('');return `<div class="grid4"><select id="ap${i}" disabled>${opts}</select><select id="au${i}" class="unitsel" disabled><option value="0">先选产品</option></select><input id="aq${i}" type="number" placeholder="数量" readonly><select id="ab${i}" class="batchsel"><option value="AUTO">先选产品</option></select></div>`;}
+function settingAsmRow(i){let opts=`<option value="">-- 第${i+1}个原料 不用就空着 --</option>`+DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`).join('');return `<div class="grid3"><select id="sap${i}" onchange="updateSettingRow(${i})">${opts}</select><select id="sau${i}" class="unitsel"><option value="0">先选产品</option></select><input id="saq${i}" type="number" placeholder="数量"></div>`;}
+function asmPage(){
+let settingCodes=[...new Set(DB.settingAssemblies.map(x=>x.code))];
+let settingProducts=DB.products.filter(p=>settingCodes.includes(p.code));
+let initRows='';
+for(let i=0;i<10;i++){let opts=`<option value="">-- 第${i+1}个原料 不用就空着 --</option>`+DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`).join('');initRows+=`<div class="grid4"><select id="ap${i}" disabled>${opts}</select><select id="au${i}" class="unitsel" disabled><option value="0">先选产品</option></select><input id="aq${i}" type="number" placeholder="数量" value="" readonly><select id="ab${i}" class="batchsel"><option value="AUTO">先选产品</option></select></div>`;}
+return `<div class="card"><h3>Create Stock Assembly - 只能选已经 Setting 好的产品</h3><p class="small">Stock Code 只显示 Code + 剩多少。成品单位、原料全部从 Setting 自动带出来，锁住不许改。只可以改 <b>产出成品多少</b>，改了下面数量会按比例自动变。只可以选右边 <b>Expire / 批次</b>。${settingProducts.length===0?'⚠️ 还没有 Setting，先去 Setting Stock Assembly 按 Save 设定。':''}</p><div class="grid5"><div><div class="lbl">成品 Stock Code</div><select id="acode" onchange="updateAsmFinished()"><option value="">-</option>${settingProducts.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`).join('')}</select></div><div><div class="lbl">成品名字</div><input id="an" value="" placeholder="成品名字 (选 Code 自动带出)" readonly></div><div><div class="lbl">成品单位 (自动, 不许改)</div><select id="aunit" class="unitsel" disabled><option value="">-</option></select></div><div><div class="lbl">产出成品多少 (可以改)</div><input id="aqout" type="number" placeholder="产出多少" value="" oninput="recalcAsmQty()" onChange="recalcAsmQty()"></div><div><div class="lbl">成品 Expire</div><input id="aexp" type="date"></div></div><div class="scroll" style="margin-top:10px"><div class="grid4"><span class="lbl">原料 Stock Code (自动, 不许改)</span><span class="lbl">单位 (自动, 不许改)</span><span class="lbl">数量 (自动, 不许改)</span><span class="lbl">Expire / 批次 FEFO (可以选)</span></div>${initRows}</div><button class="o" style="margin-top:10px" onclick="addAsm()">创建 (待完成)</button></div><div class="card"><h3>Assembly 单</h3><table><tr><th>成品 Code</th><th>成品</th><th>产出</th><th>原料 (10个)</th><th>状态</th><th>操作</th></tr>${DB.assemblies.map((a,i)=>`<tr><td>${a.code||''}</td><td>${a.name}</td><td>${a.out_qty} ${a.out_unit||''}</td><td>${(a.items||[]).map(it=>`${it.product_code} ${it.qty} ${it.unit} (${it.qtyPc}pc) ${it.batch==='AUTO'?'FEFO':'Exp '+it.batch}<br>`).join('')||'-'}</td><td>${a.done?'✅ 已完成':'⏳ 待完成'}</td><td>${!a.done?`<button class="g" onclick="doneAsm(${i})">已完成</button> `:''}<button class="r" onclick="delAsm(${i})">删除</button></td></tr>`).join('')}</table><p class="small">已完成按删除：原料会加回去，成品会扣回去，库存还回去，再删掉这条记录。</p></div>`;}
+function settingAsmPage(){let rows='';for(let i=0;i<10;i++)rows+=settingAsmRow(i);let firstP=DB.products[0];return `<div class="card"><h3>Setting Stock Assembly - 设定配方</h3><p class="small">Stock Code 只显示 Code + 剩多少。没有 Date，没有 Expire。上面成品可以选单位，下面 10 个原料选 Stock Code + 单位 + 数量，按 Save 就存起来，不扣库存。要改配方来这里改。</p><div class="grid"><select id="sacode" onchange="updateSettingFinished()">${DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`)}</select><input id="san" value="${firstP?firstP.name:''}" placeholder="成品名字 (选 Code 自动带出)"><select id="saunit" class="unitsel">${firstP?unitOptions(firstP.code):''}</select><input id="saqout" type="number" placeholder="产出成品多少"></div><div class="scroll" style="margin-top:10px"><div class="grid3"><span class="lbl">原料 Stock Code</span><span class="lbl">单位</span><span class="lbl">数量</span></div>${rows}</div><button class="g" style="margin-top:10px" onclick="saveSettingAsm()">Save</button></div><div class="card"><h3>已 Save 的设定</h3><table><tr><th>成品 Code</th><th>成品</th><th>产出</th><th>原料 (10个)</th><th>操作</th></tr>${DB.settingAssemblies.map((a,i)=>`<tr><td>${a.code||''}</td><td>${a.name}</td><td>${a.out_qty} ${a.out_unit||''}</td><td>${(a.items||[]).map(it=>`${it.product_code} ${it.qty} ${it.unit} (${it.qtyPc}pc)<br>`).join('')||'-'}</td><td><button class="r" onclick="delSettingAsm(${i})">删除</button></td></tr>`).join('')}</table></div>`;}
+function render(){
+if(!currentUser||!appRole)return;
+let tabs=role()==='老板'?TABS_BOSS:TABS_WORKER;if(!tabs.includes(cur))cur=tabs[0];
+document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="${t===cur?'on':''}" onclick="cur='${t}';render()">${t}</button>`).join('');
+let h='';
+if(cur==='Dashboard'){h=`<div class="card"><h3>总览</h3><p>产品 ${DB.products.length} · 下一个 Stock Code = ${code('STK',DB.products)} · Customer = ${code('CUS',DB.customers)} · Supplier = ${code('SUP',DB.suppliers)}</p><p class="small">云端版，资料保存在 Supabase，老板和工人登录后看到同一份库存</p></div><div class="card"><h3>💾 备份 / 还原</h3><p>资料保存在 Supabase 云端；建议定期 Export 备份，避免误操作。</p><button class="g" onclick="exportDB()">💾 Export 备份 - 下载 .json 文件</button> <button class="o" onclick="document.getElementById('importFile').click()">📥 Import 还原 - 选回之前备份的 .json</button><p class="small">备份文件请存去 USB / D盘 / 发去自己 WhatsApp。还原前会问你，确定了才会盖掉现在的资料。</p></div>`+stockTable(false);}
+if(cur==='产品设置'){
+let ep=EDIT_CODE?DB.products.find(x=>x.code===EDIT_CODE):null;
+let ev=ep||{code:code('STK',DB.products),name:'',cost:'',price:'',min_level:'',units:[]};
+let uArr=ev.units||[];
+function uVal(i,f){let u=uArr[i];return u?u[f]:'';}
+h=`<div class="card"><h3>${ep?'Edit Item - 正在编辑 '+ep.code+' (改完按 保存修改)':'Create New Item'}</h3>${ep?'<p class="small">⚠️ 正在编辑 '+ep.code+'，改 Stock Code 会连库存批次一起改过去。改完按下面 保存修改，不想改了按 取消编辑。</p>':`<p class="small">Stock Code 可以自己改，默认自动给 ${code('STK',DB.products)}</p>`}<div class="grid"><input id="pcode" class="editcode" value="${ev.code}" placeholder="Stock Code 可修改 如 STK0001"><input id="pn" value="${ev.name}" placeholder="名字"><input id="pc" type="number" value="${ev.cost}" placeholder="进价"><input id="pp" type="number" value="${ev.price}" placeholder="卖价"><input id="pm" type="number" value="${ev.min_level}" placeholder="Min Level"></div><p class="small">单位 (共5个，第一个=预设) 例 1pc / 1set=2pc / 1ctn=6pc / 1pack=288pc / 1pallet=1000pc</p><div class="grid"><input id="u1" value="${uVal(0,'n')}" placeholder="单位1 如 1 pc"><input id="u1p" type="number" value="${uVal(0,'pcs')}" placeholder="单位1 =多少pc"><input id="u2" value="${uVal(1,'n')}" placeholder="单位2 如 1 set"><input id="u2p" type="number" value="${uVal(1,'pcs')}" placeholder="单位2 =多少pc"><input id="u3" value="${uVal(2,'n')}" placeholder="单位3 如 1 ctn"><input id="u3p" type="number" value="${uVal(2,'pcs')}" placeholder="单位3 =多少pc"><input id="u4" value="${uVal(3,'n')}" placeholder="单位4 如 1 pack"><input id="u4p" type="number" value="${uVal(3,'pcs')}" placeholder="单位4 =多少pc"><input id="u5" value="${uVal(4,'n')}" placeholder="单位5 如 1 pallet"><input id="u5p" type="number" value="${uVal(4,'pcs')}" placeholder="单位5 =多少pc"></div><button onclick="addP()">${ep?'💾 保存修改':' + 创建产品'}</button>${ep?` <button class="w" style="border:1px solid #d1d5db" onclick="cancelEditP()">取消编辑</button>`:''}</div>`+stockTable(true);}
+if(cur==='库存查询'||cur==='Stock Card'){h=stockTable(false)+historyTable();}
+if(cur==='Sales'){let first=DB.products[0];h=`<div class="card"><h3>Sales - 选单位 + 选批次出货</h3><p class="small">Stock Code 只显示 Code + 剩多少。选产品 → 选单位 → 选批次 → 填数量 → 开单，系统自动换算成 pc 去扣</p><div class="grid"><select id="sp" onchange="updateSales()">${DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`)}</select><select id="su" class="unitsel">${first?unitOptions(first.code):''}</select><select id="sb" class="batchsel">${first?batchOptions(first.code):''}</select><input id="sq" type="number" placeholder="数量 (按上面选的单位)"><input id="sc" placeholder="Customer"><button class="g" onclick="doSale()">开单自动扣</button></div></div><div class="card"><h3>Sales 记录</h3>${DB.sales.map(x=>`${x.product_name} -${x.qty} ${x.unit||''} (= ${x.qtyPc||x.qty} pc) 给 ${x.customer_name} ${x.batch?'(Exp '+x.batch+')':''}<br>`).join('')}</div>`;}
+if(cur==='Purchase'){let first=DB.products[0];h=`<div class="card"><h3>Purchase - 选单位 Key In 自动加</h3><p class="small">Stock Code 只显示 Code + 剩多少。选产品 → 选单位 → 填数量 → 选 Expire → 开单，系统自动换算成 pc 加进库存</p><div class="grid"><select id="pp2" onchange="updatePur()">${DB.products.map(p=>`<option value="${p.code}">${p.code} 剩 ${total(p)} pc</option>`)}</select><select id="pu" class="unitsel">${first?unitOptions(first.code):''}</select><input id="pq" type="number" placeholder="数量 (按上面选的单位)"><input id="pexp2" type="date"><input id="psup" placeholder="Supplier"><button class="g" onclick="doPur()">Key In 自动加</button></div></div><div class="card"><h3>Purchase 记录</h3>${DB.purchases.map(x=>`${x.product_name} +${x.qty} ${x.unit||''} (= ${x.qtyPc||x.qty} pc) Exp ${x.exp_date}<br>`).join('')}</div>`;}
+if(cur==='Stock Assembly'){h=asmPage();}
+if(cur==='Setting Stock Assembly'){h=settingAsmPage();}
+if(cur==='Supplier'){h=`<div class="card"><h3>Create New Supplier - ${code('SUP',DB.suppliers)}</h3><div class="grid"><input id="sn" placeholder="名字"><input id="sph" placeholder="电话"><button onclick="addSup()">+ 创建</button></div></div><div class="card">${DB.suppliers.map(s=>`${s.code} ${s.name} ${s.phone}<br>`).join('')}</div>`;}
+if(cur==='Customer'){h=`<div class="card"><h3>Create New Customer - ${code('CUS',DB.customers)}</h3><div class="grid"><input id="cn" placeholder="名字"><input id="cph" placeholder="电话"><button onclick="addCus()">+ 创建</button></div></div><div class="card">${DB.customers.map(s=>`${s.code} ${s.name} ${s.phone}<br>`).join('')}</div>`;}
+if(cur==='Debtor'){h=`<div class="card"><h3>Create Debtor</h3><div class="grid"><select id="dc">${DB.customers.map(c=>`<option>${c.name}</option>`)}</select><input id="da" type="number" placeholder="欠多少"><button class="r" onclick="alert('已记 Debtor');log('新增 Debtor '+dc.value)">+ 创建 Debtor</button></div></div>`;}
+if(cur==='用户日志'){h=`<div class="card"><h3>用户日志</h3>${DB.logs.map(l=>`${l.time} ${l.who} ${l.act}<br>`).join('')}</div>`;}
+document.getElementById('app').innerHTML=h;
+}
+function editP(c){EDIT_CODE=c;cur='产品设置';render();window.scrollTo(0,0);}
+function cancelEditP(){EDIT_CODE=null;render();}
+function addP(){
+let c=(pcode.value||'').trim().toUpperCase();
+if(!c)return alert('请填 Stock Code');
+if(!pn.value)return alert('请填产品名字');
+let units=[{n:u1.value,pcs:+u1p.value||1},{n:u2.value,pcs:+u2p.value||1},{n:u3.value,pcs:+u3p.value||1},{n:u4.value,pcs:+u4p.value||1},{n:u5.value,pcs:+u5p.value||1}].filter(x=>x.n);
+if(units.length===0)units=[{n:'1 pc',pcs:1}];
+if(EDIT_CODE){
+let idx=DB.products.findIndex(x=>x.code===EDIT_CODE);if(idx<0){EDIT_CODE=null;return alert('找不到这个产品了');}
+if(c!==EDIT_CODE&&DB.products.find(x=>x.code===c))return alert('这个 Code 已经有了，换一个: '+c);
+let oldCode=EDIT_CODE;
+DB.products[idx]={code:c,name:pn.value,cost:+pc.value||0,price:+pp.value||0,min_level:+pm.value||0,units:units};
+if(c!==oldCode){
+DB.batches.forEach(b=>{if(b.product_code===oldCode)b.product_code=c;});
+DB.history.forEach(x=>{if(x.product_code===oldCode)x.product_code=c;});
+DB.settingAssemblies.forEach(s=>{if(s.code===oldCode)s.code=c;(s.items||[]).forEach(it=>{if(it.product_code===oldCode)it.product_code=c;});});
+DB.assemblies.forEach(a=>{if(a.code===oldCode)a.code=c;(a.items||[]).forEach(it=>{if(it.product_code===oldCode)it.product_code=c;});});
+}
+log('编辑产品 '+oldCode+' -> '+c+' '+pn.value);EDIT_CODE=null;save();return;
+}
+if(DB.products.find(x=>x.code===c))return alert('这个 Code 已经有了，换一个: '+c);
+DB.products.push({code:c,name:pn.value,cost:+pc.value||0,price:+pp.value||0,min_level:+pm.value||0,units:units});
+log('创建产品 '+c+' '+pn.value);save();
+}
+function doSale(){
+let p=DB.products.find(x=>x.code===sp.value);
+if(!p)return alert('先创建产品');
+let us=(p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let u=us[+su.value]||us[0];
+let qInput=+sq.value;
+if(!qInput||qInput<=0)return alert('请填数量');
+let q=qInput*(u.pcs||1);
+let sel=sb.value;
+let label=qInput+' '+u.n;
+if(sel!=='AUTO'){
+let b=DB.batches[+sel];
+if(!b)return alert('选的批次不见了');
+if(b.qty<q)return alert('这批只剩 '+b.qty+' pc，你要扣 '+q+' pc ('+label+')，不够!');
+b.qty-=q;
+DB.sales.unshift({product_name:p.name,qty:qInput,unit:u.n,qtyPc:q,customer_name:sc.value,batch:b.exp_date});
+addHistory(p.code,'Sales -扣 Exp '+b.exp_date,-q,'卖给 '+sc.value+' 出 '+label+' = '+q+'pc Exp '+b.exp_date);log('Sales '+p.name+' '+label+' = '+q+'pc 出 Exp '+b.exp_date);save();return;
+}
+let bs=DB.batches.filter(b=>b.product_code===p.code).sort((a,b)=>a.exp_date.localeCompare(b.exp_date));let left=q;for(let b of bs){if(left<=0)break;let take=Math.min(b.qty,left);if(take>0){b.qty-=take;left-=take;}}if(left>0)return alert('库存不够! 要扣 '+q+' pc ('+label+')，现有不够');DB.sales.unshift({product_name:p.name,qty:qInput,unit:u.n,qtyPc:q,customer_name:sc.value,batch:'FEFO'});addHistory(p.code,'Sales -扣',-q,'卖给 '+sc.value+' 出 '+label);log('Sales '+p.name+' '+label);save();
+}
+function doPur(){
+let p=DB.products.find(x=>x.code===pp2.value);
+if(!p)return alert('先创建产品');
+if(!pexp2.value)return alert('请选 Expire 日期');
+let us=(p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let u=us[+pu.value]||us[0];
+let qInput=+pq.value;
+if(!qInput||qInput<=0)return alert('请填数量');
+let q=qInput*(u.pcs||1);
+let ex=DB.batches.find(b=>b.product_code===p.code&&b.exp_date===pexp2.value);
+if(ex)ex.qty+=q;else DB.batches.push({product_code:p.code,exp_date:pexp2.value,qty:q});
+DB.purchases.unshift({product_name:p.name,qty:qInput,unit:u.n,qtyPc:q,supplier_name:psup.value,exp_date:pexp2.value});
+addHistory(p.code,'Purchase +加',q,'Supplier '+psup.value+' 进 '+qInput+' '+u.n+' = '+q+'pc');log('Purchase '+p.name+' '+qInput+' '+u.n+' = '+q+'pc');save();
+}
+function collectAsmItems(){
+let items=[];
+for(let i=0;i<10;i++){
+let prod=document.getElementById('ap'+i);if(!prod||!prod.value)continue;
+let qInput=+document.getElementById('aq'+i).value;if(!qInput||qInput<=0)continue;
+let p=DB.products.find(x=>x.code===prod.value);if(!p)continue;
+let us=(p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let ui=+document.getElementById('au'+i).value||0;let u=us[ui]||us[0];
+let sel=document.getElementById('ab'+i).value||'AUTO';
+let batchLabel='AUTO';let batchIdx=null;
+if(sel!=='AUTO'){let b=DB.batches[+sel];if(b){batchLabel=b.exp_date;batchIdx=+sel;}}
+items.push({product_code:p.code,product_name:p.name,unit:u.n,unitIdx:ui,pcs:u.pcs,qty:qInput,qtyPc:qInput*(u.pcs||1),batch:batchLabel,batchIdx:batchIdx});
+}
+return items;
+}
+function collectSettingItems(){
+let items=[];
+for(let i=0;i<10;i++){
+let prod=document.getElementById('sap'+i);if(!prod||!prod.value)continue;
+let qInput=+document.getElementById('saq'+i).value;if(!qInput||qInput<=0)continue;
+let p=DB.products.find(x=>x.code===prod.value);if(!p)continue;
+let us=(p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let ui=+document.getElementById('sau'+i).value||0;let u=us[ui]||us[0];
+items.push({product_code:p.code,product_name:p.name,unit:u.n,unitIdx:ui,pcs:u.pcs,qty:qInput,qtyPc:qInput*(u.pcs||1)});
+}
+return items;
+}
+function addAsm(){
+let c=acode.value;
+if(!c)return alert('请选成品 Stock Code，先去 Setting Stock Assembly 设定');
+if(!DB.settingAssemblies.find(x=>x.code===c))return alert('这个成品还没有 Setting，先去 Setting Stock Assembly 按 Save 设定');
+let p=DB.products.find(x=>x.code===c);let nm=an.value||(p?p.name:'');
+if(!nm)return alert('请填成品名字');
+let us=(p&&p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let oui=+document.getElementById('aunit').value||0;let ou=us[oui]||us[0];
+let items=collectAsmItems();
+if(items.length===0)return alert('原料是空的，检查 Setting 有没有设定原料');
+DB.assemblies.push({code:c,name:nm,out_qty:+aqout.value||0,out_unit:ou.n,out_unitIdx:oui,out_pcs:ou.pcs,exp_date:aexp.value||'',items:items,done:false});log('创建 Assembly '+c+' '+nm+' 待完成 '+items.length+'个原料');save();
+}
+function saveSettingAsm(){
+let c=sacode.value;
+if(!c)return alert('请选成品 Stock Code，先去 产品设置 创建成品');
+let p=DB.products.find(x=>x.code===c);let nm=san.value||(p?p.name:'');
+if(!nm)return alert('请填成品名字');
+let us=(p&&p.units&&p.units.length)?p.units:[{n:'1 pc',pcs:1}];
+let oui=+saunit.value||0;let ou=us[oui]||us[0];
+let items=collectSettingItems();
+let idx=DB.settingAssemblies.findIndex(x=>x.code===c);
+let obj={code:c,name:nm,out_qty:+saqout.value||0,out_unit:ou.n,out_unitIdx:oui,out_pcs:ou.pcs,items:items};
+if(idx>=0)DB.settingAssemblies[idx]=obj;else DB.settingAssemblies.push(obj);
+log('Save Setting Assembly '+c+' '+nm+' '+items.length+'个原料');save();alert('已 Save');
+}
+function delSettingAsm(i){if(!confirm('确定删除这个设定吗?'))return;DB.settingAssemblies.splice(i,1);log('删除 Setting Assembly');save();}
+function delAsm(i){
+let a=DB.assemblies[i];if(!a)return;
+if(a.done){
+if(!confirm('这张已经 已完成，确定删除吗？\n删除后库存会还回去：\n原料加回去，成品扣回去\n\n'+a.code+' '+a.name))return;
+let p=DB.products.find(x=>x.code===a.code)||DB.products.find(x=>x.name===a.name);
+let outPc=a.out_qty*(a.out_pcs||1);
+if(p){
+let tot=DB.batches.filter(b=>b.product_code===p.code).reduce((s,b)=>s+b.qty,0);
+if(tot<outPc){if(!confirm('成品 '+p.code+' 现在只剩 '+tot+' pc，要扣回去 '+outPc+' pc，不够扣！\n是不是成品已经卖掉了？\n按确定还是会硬扣，库存会变负数。要继续吗？'))return;}
+let left=outPc;
+let bs=DB.batches.filter(b=>b.product_code===p.code).sort((x,y)=>x.exp_date.localeCompare(y.exp_date));
+for(let b of bs){if(left<=0)break;let take=Math.min(b.qty,left);b.qty-=take;left-=take;}
+if(left>0){let fb=DB.batches.find(b=>b.product_code===p.code);if(fb)fb.qty-=left;else DB.batches.push({product_code:p.code,exp_date:a.exp_date||new Date().toISOString().slice(0,10),qty:-left});}
+addHistory(p.code,'删除已完成 Assembly 扣回成品',-outPc,'删除 Assembly '+a.code+' 扣回成品 '+a.out_qty+' '+a.out_unit);
+}
+for(let it of (a.items||[])){
+let ex=null;
+if(it.batchIdx!==null&&it.batchIdx!==undefined&&DB.batches[it.batchIdx]&&DB.batches[it.batchIdx].product_code===it.product_code){ex=DB.batches[it.batchIdx];}
+if(!ex)ex=DB.batches.find(b=>b.product_code===it.product_code&&b.exp_date===it.batch);
+if(!ex){let lst=DB.batches.filter(b=>b.product_code===it.product_code).sort((x,y)=>x.exp_date.localeCompare(y.exp_date));ex=lst[0];}
+if(ex){ex.qty+=it.qtyPc;}
+else{DB.batches.push({product_code:it.product_code,exp_date:it.batch&&it.batch!=='AUTO'?it.batch:(a.exp_date||new Date().toISOString().slice(0,10)),qty:it.qtyPc});}
+addHistory(it.product_code,'删除已完成 Assembly 加回原料',it.qtyPc,'删除 Assembly '+a.code+' 加回原料 '+it.qty+' '+it.unit);
+}
+}else{
+if(!confirm('确定删除这张待完成吗？\n待完成还没扣库存，直接删掉就好\n\n'+a.code+' '+a.name))return;
+}
+DB.assemblies.splice(i,1);log('删除 Assembly '+a.code+' '+a.name+(a.done?' 已还回库存':''));save();
+}
+function doneAsm(i){
+let a=DB.assemblies[i];
+if(!a||a.done)return;
+for(let it of (a.items||[])){
+if(it.batchIdx!==null&&it.batchIdx!==undefined){
+let b=DB.batches[it.batchIdx];if(!b||b.qty<it.qtyPc)return alert(it.product_name+' 这批 Exp '+it.batch+' 只剩 '+(b?b.qty:0)+' pc，要扣 '+it.qtyPc+' pc，不够!');
+}else{
+let tot=DB.batches.filter(b=>b.product_code===it.product_code).reduce((s,b)=>s+b.qty,0);if(tot<it.qtyPc)return alert(it.product_name+' 总库存只剩 '+tot+' pc，要扣 '+it.qtyPc+' pc，不够!');
+}
+}
+for(let it of (a.items||[])){
+if(it.batchIdx!==null&&it.batchIdx!==undefined){
+DB.batches[it.batchIdx].qty-=it.qtyPc;
+addHistory(it.product_code,'Assembly 扣 Exp '+it.batch,-it.qtyPc,'Assembly '+a.code+' '+a.name+' 用 '+it.qty+' '+it.unit);
+}else{
+let left=it.qtyPc;let bs=DB.batches.filter(b=>b.product_code===it.product_code).sort((x,y)=>x.exp_date.localeCompare(y.exp_date));for(let b of bs){if(left<=0)break;let take=Math.min(b.qty,left);b.qty-=take;left-=take;}
+addHistory(it.product_code,'Assembly 扣 FEFO',-it.qtyPc,'Assembly '+a.code+' '+a.name+' 用 '+it.qty+' '+it.unit);
+}
+}
+a.done=true;
+let p=DB.products.find(x=>x.code===a.code)||DB.products.find(x=>x.name===a.name);
+if(!p){p={code:a.code||code('STK',DB.products),name:a.name,cost:0,price:0,min_level:0,units:[{n:'1 pc',pcs:1}]};DB.products.push(p);}
+let exp=a.exp_date||new Date().toISOString().slice(0,10);
+let outPc=a.out_qty*(a.out_pcs||1);
+let ex=DB.batches.find(b=>b.product_code===p.code&&b.exp_date===exp);if(ex)ex.qty+=outPc;else DB.batches.push({product_code:p.code,exp_date:exp,qty:outPc});
+addHistory(p.code,'Assembly 完成 +加',outPc,'Assembly 完成 '+a.code);log('Assembly 已完成 '+a.code+' '+a.name);save();
+}
+function addSup(){DB.suppliers.push({code:code('SUP',DB.suppliers),name:sn.value,phone:sph.value});log('新增 Supplier '+sn.value);save();}
+function addCus(){DB.customers.push({code:code('CUS',DB.customers),name:cn.value,phone:cph.value});log('新增 Customer '+cn.value);save();}
+// Supabase Auth 会话监听：登录后读取账号角色与云端资料
+sb.auth.onAuthStateChange((_event,session)=>{handleSession(session);});
+document.getElementById('authForm').addEventListener('submit',async(e)=>{e.preventDefault();const email=document.getElementById('authEmail').value.trim(),password=document.getElementById('authPassword').value;const {error}=await sb.auth.signInWithPassword({email,password});if(error)authMessage(error.message);});
+</script></body></html>
